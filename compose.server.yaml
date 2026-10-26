@@ -1,0 +1,27 @@
+name: whatsapp-service
+
+services:
+  whatsapp:
+    build: .
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      ESCALATION_DATABASE_URL: ${ESCALATION_DATABASE_URL:?Set the server PostgreSQL URL in .env}
+      WHATSAPP_SESSION_PATH: /service/data/whatsapp-session.sqlite3
+    ports:
+      - "127.0.0.1:8202:8201"
+    volumes:
+      - whatsapp-data:/service/data
+    networks:
+      whatsapp-ai:
+        aliases:
+          - whatsapp-service
+    stop_grace_period: 60s
+
+volumes:
+  whatsapp-data:
+
+networks:
+  whatsapp-ai:
+    external: true
+    name: whatsapp-ai-network

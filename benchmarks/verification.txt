@@ -1,0 +1,22 @@
+Verified 26 October 2026
+
+Baseline existing suite: 60 passed in 45.55s (one pre-existing pytest cache permission warning).
+Final complete suite: 99 passed, 1 skipped in 78.33s.
+The skipped test requires an explicitly disposable PostgreSQL database.
+That PostgreSQL integration test was run separately: 1 passed in 0.51s.
+It verified migrations, persistent cache, job claims, child-report ownership, token usage and rollback/up migration.
+The temporary PostgreSQL 17 test container was removed after verification.
+
+Focused hybrid suite: 35 passed in 21.74s.
+After the final paid-response-key/window-reuse adjustment, both affected semantic/recovery tests passed in 1.91s.
+
+Angular TypeScript: tsc --noEmit -p tsconfig.app.json passed.
+Angular template compiler: ngc -p tsconfig.app.json --noEmit passed.
+No live browser or paid provider test was performed.
+
+Offline fixed synthetic extractor benchmark: benchmarks/hybrid-synthetic.json.
+107 groups; 8.795 ms total extraction/source validation; zero actual AI calls.
+These timings exclude database/jobs/exports/network and do not establish production speedup.
+Human-reviewed escalation precision/recall and production quality parity remain unmeasured.
+
+Live .env files and running services were not changed or restarted.

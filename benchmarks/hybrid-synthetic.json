@@ -1,0 +1,24 @@
+{
+  "kind": "offline_extraction_only",
+  "groups": 107,
+  "elapsed_ms": 8.795,
+  "latency_ms": {
+    "p50": 0.0708,
+    "p95": 0.08243,
+    "p99": 0.118132
+  },
+  "routes": {
+    "deterministic": 107
+  },
+  "actual_ai_calls": 0,
+  "labelled_groups": 107,
+  "awb_extraction_precision": 1.0,
+  "awb_extraction_recall": 1.0,
+  "escalation_detection_precision": null,
+  "escalation_detection_recall": null,
+  "differences": [],
+  "quality_note": "AWB extraction is not escalation detection accuracy. Ambiguous cases require AI/review; no paid calls run.",
+  "dataset": "107 synthetic factual groups; NOT human reviewed",
+  "legacy_prompt_bytes": 17611,
+  "hybrid_prompt_bytes": 2303
+}
