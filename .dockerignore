@@ -1,4 +1,6 @@
 .env
+.env.*
+.git
 .venv
 __pycache__
 **/__pycache__
@@ -6,3 +8,7 @@ __pycache__
 .pytest_cache
 data
 tests
+*.dump
+*.sqlite3
+*.sqlite3-*
+*.tar.gz

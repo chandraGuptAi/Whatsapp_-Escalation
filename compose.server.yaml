@@ -4,9 +4,11 @@ services:
   whatsapp:
     build: .
     restart: unless-stopped
+    init: true
     env_file: .env
     environment:
       ESCALATION_DATABASE_URL: ${ESCALATION_DATABASE_URL:?Set the server PostgreSQL URL in .env}
+      ESCALATION_SERVICE_TOKEN: ${ESCALATION_SERVICE_TOKEN:?Set the shared service token in .env}
       WHATSAPP_SESSION_PATH: /service/data/whatsapp-session.sqlite3
     ports:
       - "127.0.0.1:8202:8201"
@@ -17,6 +19,11 @@ services:
         aliases:
           - whatsapp-service
     stop_grace_period: 60s
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
 
 volumes:
   whatsapp-data:
