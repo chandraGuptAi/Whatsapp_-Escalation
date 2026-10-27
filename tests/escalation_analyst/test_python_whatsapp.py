@@ -54,6 +54,45 @@ def test_native_message_is_saved_and_legacy_sender_keys_deduplicate(client):
     assert all(row['group_id'].endswith('@g.us') for row in r.groups.messages(None))
 
 
+def test_live_millisecond_timestamps_are_stored_as_seconds(client):
+    r=client.app.state.runtime
+    now=int(time.time())
+    live=event('millis')
+    live.Info.Timestamp=now*1000+456          # native live events use epoch milliseconds
+    r.whatsapp.receiver.live(None,live)
+    [row]=[m for m in r.groups.messages('test@g.us') if m['wa_id'].endswith('_millis')]
+    assert row['timestamp']==now
+    [group]=[g for g in r.groups.list() if g['group_id']=='test@g.us']
+    assert group['today_messages']>=1 and group['last_message_ts']<=time.time()
+
+
+class Contacts:
+    """Linked-phone contact store: LID 111 maps to 919800000001, saved as Ramesh FE."""
+    def __init__(self):
+        self.contact=SimpleNamespace(get_contact=lambda j: n.ContactInfo(Found=True,FullName='Ramesh FE',PushName='Ramesh')
+            if j.User=='919800000001' else n.ContactInfo(Found=False))
+
+    def get_pn_from_lid(self, j):
+        return build_jid('919800000001') if j.User=='111' else n.JID()
+
+
+def test_lid_sender_without_pushname_uses_phone_contact_name(client):
+    r=client.app.state.runtime
+    receiver=r.whatsapp.receiver
+    old=event('before-sync',sender='111');old.Info.Pushname='';old.Info.MessageSource.Sender.Server='lid'
+    receiver.live(None,old)
+    assert r.groups.messages('test@g.us')[-1]['author_name']=='111@lid'
+    live=event('lid',sender='111');live.Info.Pushname='';live.Info.MessageSource.Sender.Server='lid'
+    receiver.live(Contacts(),live)
+    assert r.groups.messages('test@g.us')[-1]['author_name']=='Ramesh FE'
+    stranger=event('stranger',sender='222');stranger.Info.Pushname=''
+    receiver.live(Contacts(),stranger)
+    assert r.groups.messages('test@g.us')[-1]['author_name']=='+222'
+    assert receiver.rename_authors(Contacts())==1
+    names={m['wa_id'].rsplit('_',1)[1]:m['author_name'] for m in r.groups.messages('test@g.us')}
+    assert names['before-sync']=='Ramesh FE' and names['stranger']=='+222'
+
+
 def test_paused_group_and_history_sync(client):
     r=client.app.state.runtime
     ingest(client)

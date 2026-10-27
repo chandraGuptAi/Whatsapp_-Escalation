@@ -84,6 +84,17 @@ class Groups:
             )
         )
 
+    def unnamed_authors(self) -> list[str]:
+        return [row["author"] for row in self.db.read(
+            "SELECT DISTINCT author FROM messages WHERE author IS NOT NULL AND author<>'' AND (author_name IS NULL OR author_name='' OR author_name=author)"
+        )]
+
+    def rename_author(self, author: str, name: str) -> int:
+        return self.db.write(
+            "UPDATE messages SET author_name=? WHERE author=? AND (author_name IS NULL OR author_name='' OR author_name=author)",
+            (name, author),
+        ) or 0
+
     def has_message_key(self, group_id: str, prefix: str) -> bool:
         return bool(self.db.read(
             "SELECT id FROM messages WHERE group_id=? AND (wa_id=? OR substr(wa_id,1,?)=?) LIMIT 1",
