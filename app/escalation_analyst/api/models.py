@@ -67,6 +67,7 @@ class Preset(Input):
 
 class Message(Input):
     wa_id: str = Field(min_length=1, max_length=250)
+    quoted_wa_id: str | None = Field(default=None, max_length=250)
     group_id: str = Field(min_length=1, max_length=250)
     group_name: str = Field(default="", max_length=250)
     author: str | None = Field(default=None, max_length=250)

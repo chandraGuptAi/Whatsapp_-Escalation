@@ -79,7 +79,7 @@ def validate_mappings(source: dict | None = None) -> dict:
         string(row, "groupId", True)
         string(row, "awb", True)
         string(row, "opsRemark")
-        if not re.fullmatch(r"\d{8,16}", row["awb"], re.ASCII) or row.get("status") not in STATUSES:
+        if not re.fullmatch(r"(?:[A-Za-z]{2,8})?\d{8,16}", row["awb"], re.ASCII) or row.get("status") not in STATUSES:
             bad("Invalid AWB or ERP status")
         for key in (
             "observedAt",

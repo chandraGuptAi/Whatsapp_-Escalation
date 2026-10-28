@@ -163,7 +163,7 @@ def test_master_export_stable_after_new_group_report_and_membership_change(clien
     response = client.get("/master/bulk-export", params={"reportId": run["master_report_id"]})
     assert response.status_code == 200
     rows = list(load_workbook(io.BytesIO(response.content), data_only=True).active.values)
-    assert rows[1][3] == "12345678"
+    assert rows[1][4] == "12345678"
 
 
 def test_sse_auth_terminal_and_retry_frozen_window(client):

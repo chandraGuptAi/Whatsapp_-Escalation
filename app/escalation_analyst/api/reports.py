@@ -17,6 +17,33 @@ from ..errors import EscalationError
 router = APIRouter(dependencies=[Depends(user)], tags=["Escalation reports"])
 
 
+@router.get("/master/directory")
+def master_directory(r=Depends(runtime)) -> dict:
+    from ..analysis.master_rows import directory
+    return directory(r)
+
+
+@router.put("/master/directory")
+def save_master_directory(body: dict, r=Depends(runtime)) -> dict:
+    from ..performance.mappings import validate_mappings
+    if len(json.dumps(body).encode()) > 8 * 1024 * 1024:
+        raise EscalationError(400, "Directory exceeds 8MB")
+    mappings = validate_mappings(body)
+    r.db.write("INSERT INTO master_report_directory(id,payload) VALUES(1,?) ON CONFLICT(id) DO UPDATE SET payload=excluded.payload",
+               (json.dumps(mappings),))
+    return {"counts": {key: len(value) for key, value in mappings.items()}}
+
+
+@router.get("/master/reports/{report_id}/rows")
+def master_report_rows(report_id: int, r=Depends(runtime)) -> dict:
+    from ..analysis.master_rows import HEADERS, report_rows, children_for_report
+    report = r.reports.get(report_id)
+    children = children_for_report(r, report)
+    return dict(headers=HEADERS, rows=report_rows(r, children),
+                countScope="Saved report window; one entry per seller message and AWB",
+                identityNote="Identities require an ID and name match in the master directory.")
+
+
 @router.get("/reports/history/summary")
 def summary(r=Depends(runtime)) -> dict:
     reports = r.reports.history()
@@ -188,13 +215,13 @@ def bulk_export(
     if report is not None and report["scope"] == "master":
         children = r.reports.children(reportId)
         if children:
-            return Response(export_bulk(children), media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            return Response(export_bulk(children, r), media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                             headers={"Content-Disposition": 'attachment; filename="master_escalations.xlsx"'})
     if runId is not None:
         checkpoint = r.jobs.get(runId, "master")["result"] or {}
         if "group_report_ids" in checkpoint:
             children = [r.reports.get(i) for i in checkpoint["group_report_ids"].values()]
-            return Response(export_bulk(children), media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            return Response(export_bulk(children, r), media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                             headers={"Content-Disposition": 'attachment; filename="master_escalations.xlsx"'})
     if report is not None and report["scope"] != "master":
         selected = [report]
@@ -217,7 +244,7 @@ def bulk_export(
             latest.setdefault(row["group_id"], row)
         selected = list(latest.values())
     return Response(
-        export_bulk(selected),
+        export_bulk(selected, r),
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         headers={"Content-Disposition": 'attachment; filename="master_escalations.xlsx"'},
     )

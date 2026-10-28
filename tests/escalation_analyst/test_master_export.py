@@ -18,4 +18,7 @@ def test_master_report_download_uses_its_cluster_and_period(client):
     response=client.get('/master/bulk-export',params={'reportId':master,'clusterId':'wrong-ui-selection'})
     assert response.status_code==200,response.text
     rows=list(load_workbook(io.BytesIO(response.content),data_only=True).active.values)
-    assert rows==[('Company','AWB','Status'),('test@g.us','12345678','Delayed')]
+    assert rows[0][:5] == ('Company', 'Time', 'Seller', 'No. of Escalation Entries', 'AWB')
+    assert len(rows) == 2 and rows[1][0] == 'test@g.us' and rows[1][4] == '12345678'
+    preview = client.get(f'/master/reports/{master}/rows').json()
+    assert preview['rows'][0]['awb'] == '12345678'

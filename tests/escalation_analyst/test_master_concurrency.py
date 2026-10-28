@@ -244,7 +244,7 @@ def test_bulk_export_after_concurrent_run(client):
     response = client.get("/master/bulk-export", params={"runId": run["id"]})
     assert response.status_code == 200, response.text
     rows = list(load_workbook(io.BytesIO(response.content), data_only=True).active.values)
-    assert len(rows) == 4 and rows[0][:4] == ("Company", "Time", "Seller", "AWB")
+    assert len(rows) == 4 and rows[0][:5] == ("Company", "Time", "Seller", "No. of Escalation Entries", "AWB")
 
 
 def test_aggregate_validation_and_compaction():

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 DDL = """
 CREATE TABLE IF NOT EXISTS schema_version (version INTEGER PRIMARY KEY);
+CREATE TABLE IF NOT EXISTS master_report_directory (id INTEGER PRIMARY KEY, payload TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS whatsapp_groups (group_id TEXT PRIMARY KEY, group_name TEXT, is_active INTEGER NOT NULL DEFAULT 1);
 CREATE TABLE IF NOT EXISTS group_name_overrides (group_id TEXT PRIMARY KEY, name TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS group_names_learned (group_id TEXT PRIMARY KEY, name TEXT NOT NULL);
@@ -34,6 +35,6 @@ CREATE TABLE IF NOT EXISTS analysis_ai_calls (call_key TEXT PRIMARY KEY, status 
 """
 
 # Additive, nullable columns for databases created before they existed (never drops or rewrites data).
-ADDED_COLUMNS = [("reports", "prompt_version", "TEXT"), ("usage_log", "reasoning_tokens", "BIGINT"),
+ADDED_COLUMNS = [("messages", "quoted_wa_id", "TEXT"), ("reports", "prompt_version", "TEXT"), ("usage_log", "reasoning_tokens", "BIGINT"),
                  ("usage_log", "latency_ms", "REAL"), ("usage_log", "retry_count", "INTEGER"),
                  ("reports", "message_hash", "TEXT")]

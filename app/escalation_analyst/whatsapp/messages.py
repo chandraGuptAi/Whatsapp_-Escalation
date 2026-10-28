@@ -54,6 +54,15 @@ class MessageReceiver:
         data = dict(wa_id=key, group_id=chat, group_name=name or info["name"] or chat,
                     author=sender, author_name=pushname or sender, body=body,
                     msg_type=kind, timestamp=stamp, has_media=int(media is not None))
+        for field in ("extendedTextMessage", "imageMessage", "videoMessage", "audioMessage", "documentMessage"):
+            if unwrapped.HasField(field):
+                context = getattr(unwrapped, field).contextInfo
+                if context.stanzaID:
+                    rows = self.r.db.read("SELECT wa_id FROM messages WHERE group_id=? AND wa_id IN (?,?)",
+                                          (chat, f"false_{chat}_{context.stanzaID}", f"true_{chat}_{context.stanzaID}"))
+                    if len(rows) == 1:
+                        data["quoted_wa_id"] = rows[0]["wa_id"]
+                break
         result = ingest(self.r, data)
         if result["inserted"] and media is not None:
             self.r.groups.update_body(result["id"], (body + " [media analysing]").strip())

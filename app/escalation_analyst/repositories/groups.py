@@ -75,10 +75,10 @@ class Groups:
         ]["is_active"]
         if not active:
             return False
-        keys = ("wa_id", "group_id", "group_name", "author", "author_name", "body", "msg_type", "timestamp")
+        keys = ("wa_id", "group_id", "group_name", "author", "author_name", "body", "msg_type", "timestamp", "quoted_wa_id")
         return bool(
             self.db.write(
-                "INSERT INTO messages(wa_id,group_id,group_name,author,author_name,body,msg_type,timestamp,has_media,created_at) VALUES(?,?,?,?,?,?,?,?,?,?) ON CONFLICT(wa_id) WHERE wa_id IS NOT NULL DO NOTHING",
+                "INSERT INTO messages(wa_id,group_id,group_name,author,author_name,body,msg_type,timestamp,quoted_wa_id,has_media,created_at) VALUES(?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(wa_id) WHERE wa_id IS NOT NULL DO NOTHING",
                 tuple(data.get(k) for k in keys)
                 + (int(bool(data.get("media") or data.get("has_media"))), int(time.time())),
             )

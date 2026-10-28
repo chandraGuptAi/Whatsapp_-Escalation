@@ -7,32 +7,39 @@ from ..errors import EscalationError
 
 PHONE = re.compile(r"^[6-9]\d{9}$", re.ASCII)
 EXPLICIT = re.compile(
-    r"\b(?:awb|lr|tracking(?:\s*(?:id|no|number))?)\s*(?:number|no\.?|id)?\s*[:#=-]?\s*$", re.I | re.ASCII
+    r"\b(?:awbs?|lrs?|tracking(?:\s*(?:ids?|nos?|numbers?))?)\s*(?:numbers?|nos?\.?|ids?)?\s*[:#=-]?\s*$", re.I | re.ASCII
 )
 CONTACT = re.compile(
     r"(?:phone|mobile|contact|call|whatsapp|number pe)\s*(?:no\.?|number)?\s*[:#=-]?\s*$", re.I | re.ASCII
 )
+TOKEN = re.compile(r"(?<![A-Za-z0-9])(?:[A-Za-z]{2,8}\d{6,16}|\d{8,16})(?![A-Za-z0-9])", re.ASCII)
 
 
-def extract_awbs(text: str, legacy: bool = False, min_digits: int = 8, max_digits: int = 16) -> list[dict]:
+def extract_awbs(text: str, legacy: bool = False, min_digits: int = 8, max_digits: int = 16,
+                 include_phone_candidates: bool = False) -> list[dict]:
     if min_digits < 8 or max_digits > 16 or min_digits > max_digits:
         raise EscalationError(400, "Invalid AWB length configuration")
     text = str(text or "")
     values = {}
-    for match in re.finditer(r"\b\d{8,16}\b", text, re.ASCII):
+    list_label = False
+    previous_end = 0
+    for match in TOKEN.finditer(text):
         awb = match.group()
-        if not min_digits <= len(awb) <= max_digits:
+        if not min_digits <= sum(c.isdigit() for c in awb) <= max_digits:
             continue
+        awb = awb.upper()
         before = text[max(0, match.start() - 40) : match.start()]
-        explicit = bool(EXPLICIT.search(before))
+        separator = text[previous_end:match.start()]
+        explicit = bool(EXPLICIT.search(before)) or bool(list_label and re.fullmatch(r"[\s,;/\\|&]+", separator))
+        list_label, previous_end = explicit, match.end()
         phone = bool(PHONE.fullmatch(awb))
-        if phone and (legacy or not explicit):
+        if phone and (legacy or (not explicit and not include_phone_candidates)):
             continue
         if not legacy and CONTACT.search(before) and not explicit:
             continue
         if awb not in values or explicit:
             values[awb] = dict(
-                awb=awb,
+                awb=awb.upper(),
                 confidence="explicit" if explicit else "candidate",
                 phoneShaped=phone,
                 rule=(

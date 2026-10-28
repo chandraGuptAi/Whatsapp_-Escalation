@@ -71,6 +71,19 @@ def test_paused_group_and_history_sync(client):
     assert r.groups.get('test@g.us')['group_name']=='Actual group'
 
 
+def test_native_quoted_staff_reply_preserves_source_key(client):
+    r = client.app.state.runtime
+    receiver = r.whatsapp.receiver
+    receiver.live(None, event('seller-enquiry', '12345678 / BGSC0078363792'))
+    reply = event('staff-reply', sender='staff')
+    reply.Message.CopyFrom(e.Message(extendedTextMessage=e.ExtendedTextMessage(
+        text='Checking with courier', contextInfo=e.ContextInfo(stanzaID='seller-enquiry'))))
+    receiver.live(None, reply)
+    messages = r.groups.messages('test@g.us')
+    assert len(messages) == 2
+    assert messages[1]['quoted_wa_id'] == messages[0]['wa_id']
+
+
 def test_qr_is_local_svg_and_cleared_on_connection(client):
     transport=client.app.state.runtime.whatsapp
     transport.qr(None,b'local-test-qr')
