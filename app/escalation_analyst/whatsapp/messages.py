@@ -16,6 +16,27 @@ def jid(value) -> str:
     return f"{value.User}@{value.Server}" if value.User and value.Server else ""
 
 
+def display_name(client, sender: str, alt: str = "", pushname: str = "") -> str:
+    """Name the linked phone shows: saved contact, then WhatsApp profile name, then phone number."""
+    addresses = [a for a in (sender, alt) if "@" in a]
+    saved = profile = ""
+    if client is not None and addresses:
+        from neonize.utils.jid import build_jid
+        try:
+            # Group senders arrive as hidden @lid ids; the contact store is keyed by phone number.
+            if not any(a.endswith("@s.whatsapp.net") for a in addresses):
+                addresses += [a for a in (jid(client.get_pn_from_lid(build_jid(*sender.split("@", 1)))),) if a]
+            for address in addresses:
+                info = client.contact.get_contact(build_jid(*address.split("@", 1)))
+                if info.Found:
+                    saved = saved or info.FullName or info.FirstName
+                    profile = profile or info.PushName or info.BusinessName
+        except Exception:
+            logger.debug("WhatsApp contact lookup failed for %s", sender, exc_info=True)
+    phone = next(("+" + a.split("@")[0] for a in addresses if a.endswith("@s.whatsapp.net")), "")
+    return saved or pushname or profile or phone or sender
+
+
 def content(message):
     for _ in range(5):
         wrapper = next((name for name in ("ephemeralMessage", "viewOnceMessage", "viewOnceMessageV2", "viewOnceMessageV2Extension", "documentWithCaptionMessage") if message.HasField(name)), None)
@@ -37,7 +58,10 @@ class MessageReceiver:
     def __init__(self, runtime):
         self.r = runtime
 
-    def save(self, client, chat: str, token: str, sender: str, stamp: int, message, name="", pushname="", from_me=False):
+    def save(self, client, chat: str, token: str, sender: str, stamp: int, message, name="", pushname="", from_me=False, alt=""):
+        # Live events carry epoch milliseconds, history sync epoch seconds; storage and every query use seconds.
+        if stamp > 10**11:
+            stamp //= 1000
         if not chat.endswith("@g.us") or not token or stamp <= 0:
             return
         body, kind, media, unwrapped = content(message)
@@ -52,7 +76,7 @@ class MessageReceiver:
             return
         info = self.r.groups.transport_info(chat)
         data = dict(wa_id=key, group_id=chat, group_name=name or info["name"] or chat,
-                    author=sender, author_name=pushname or sender, body=body,
+                    author=sender, author_name=display_name(client, sender, alt, pushname), body=body,
                     msg_type=kind, timestamp=stamp, has_media=int(media is not None))
         for field in ("extendedTextMessage", "imageMessage", "videoMessage", "audioMessage", "documentMessage"):
             if unwrapped.HasField(field):
@@ -97,9 +121,18 @@ class MessageReceiver:
                                  lambda _: self.r.analysis.group(group_id, {"hours": 24, "deliver": True, "trigger": "command"}))
                 return
             self.save(client, jid(source.Chat), info.ID, jid(source.Sender), int(info.Timestamp),
-                      event.Message, pushname=info.Pushname, from_me=source.IsFromMe)
+                      event.Message, pushname=info.Pushname, from_me=source.IsFromMe, alt=jid(source.SenderAlt))
         except Exception:
             logger.exception("Native WhatsApp message could not be saved")
+
+    def rename_authors(self, client) -> int:
+        """Replace raw sender ids saved before the contact store knew the name."""
+        renamed = 0
+        for author in self.r.groups.unnamed_authors():
+            name = display_name(client, jid(author))
+            if name != author and name != jid(author):
+                renamed += self.r.groups.rename_author(author, name)
+        return renamed
 
     def history(self, client, event):
         try:

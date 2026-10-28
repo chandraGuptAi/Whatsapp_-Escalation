@@ -136,7 +136,7 @@ class NativeWhatsApp:
         groups = self.client.get_joined_groups()
         for group in groups:
             self.r.groups.learn(jid(group.JID), group.GroupName.Name)
-        return {"ok": True, "updated": len(groups)}
+        return {"ok": True, "updated": len(groups), "authors": self.receiver.rename_authors(self.client)}
 
     def send(self, recipient: str, text: str) -> dict:
         if self.status()["state"] != "ready":
