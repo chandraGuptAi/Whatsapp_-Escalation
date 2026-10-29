@@ -6,6 +6,7 @@ from __future__ import annotations
 
 from contextlib import asynccontextmanager
 
+import httpx
 from fastapi import FastAPI
 
 from .core import cache
@@ -21,7 +22,7 @@ from .core.reports import routes as report_routes
 from .core.services import build_services
 
 
-def create_app(settings: Settings | None = None) -> FastAPI:
+def create_app(settings: Settings | None = None, *, http_client: httpx.AsyncClient | None = None) -> FastAPI:
     settings = settings or get_settings()
     configure_logging()
     modules = discover(settings.disabled_modules)
@@ -30,10 +31,13 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     async def lifespan(app: FastAPI):
         app.state.db = Database(settings.database_url, min_size=settings.db_pool_min, max_size=settings.db_pool_max)
         await app.state.db.open()
-        app.state.redis = await cache.connect(settings.redis_url, required=settings.env != "dev")
+        app.state.redis = await cache.connect(settings.redis_url, required=settings.env not in ("dev", "test"))
+        app.state.http = http_client or httpx.AsyncClient(trust_env=False, follow_redirects=False)
         try:
             yield
         finally:
+            if http_client is None:
+                await app.state.http.aclose()
             if app.state.redis is not None:
                 await app.state.redis.aclose()
             await app.state.db.close()

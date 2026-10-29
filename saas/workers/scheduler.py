@@ -9,7 +9,7 @@ import asyncio
 import logging
 from datetime import datetime, timedelta
 
-from app.core.db import system_transaction, tenant_transaction
+from app.core.db import system_transaction, tenant_transaction, use_selector_loop_on_windows
 from app.core.queue import enqueue
 from app.core.reports.presets import next_run
 
@@ -61,4 +61,5 @@ async def main() -> None:
 
 
 if __name__ == "__main__":
+    use_selector_loop_on_windows()
     asyncio.run(main())

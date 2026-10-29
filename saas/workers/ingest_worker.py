@@ -11,7 +11,7 @@ import asyncio
 import logging
 import os
 
-from app.core.db import system_transaction
+from app.core.db import system_transaction, use_selector_loop_on_windows
 
 from .runtime import runtime
 
@@ -55,4 +55,5 @@ async def main() -> None:
 
 
 if __name__ == "__main__":
+    use_selector_loop_on_windows()
     asyncio.run(main())

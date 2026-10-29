@@ -1,10 +1,18 @@
 """One async connection pool per process; connections return rows as dicts."""
 from __future__ import annotations
 
+import asyncio
+import sys
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from psycopg_pool import AsyncConnectionPool
+
+
+def use_selector_loop_on_windows() -> None:
+    """psycopg's async driver cannot use Windows' default Proactor loop. Call before asyncio starts."""
+    if sys.platform == "win32":
+        asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
 
 
 class Database:

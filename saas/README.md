@@ -32,12 +32,40 @@ tests/                 contract tests + tenant isolation tests (real PostgreSQL)
 - Add a module: create `app/modules/<key>/` with `MODULE = Module(key="<key>", ...)` and insert a row into
   `app.modules`. Remove one: delete the folder, or list it in `DISABLED_MODULES`.
 
+## Sign-in from a customer ERP (module-only tokens)
+
+The ERP keeps its own login. When the user opens WhatsApp Escalation, the frontend sends the ERP
+token once; the module confirms it by calling the ERP's own "current user" API and returns a
+module token that works only here (`aud = whatsapp-escalation`). Nothing from the browser's
+localStorage (role, mobile, user id) is trusted, and the ERP token is never stored.
+
+```text
+POST /v1/auth/exchange/<provider-slug>   {"erp_token": "<ERP bearer token>"}  -> access + refresh token
+POST /v1/auth/refresh                    {"refresh_token": "..."}             -> new pair (old one revoked)
+POST /v1/auth/logout                     {"refresh_token": "..."}
+```
+
+Register each customer's ERP once (as the admin role), pointing `verify_url` at an ERP API that
+returns the signed-in user for a Bearer token, and `config` at the fields in its reply:
+
+```sql
+INSERT INTO app.tenants (slug, name) VALUES ('bigship', 'Bigship') RETURNING id;
+INSERT INTO app.identity_providers (tenant_id, slug, name, verify_url, config) VALUES (
+  '<tenant id>', 'bigship-erp', 'Bigship ERP', 'https://<erp host>/<current-user API>',
+  '{"user_id_path": "data.login_user_id", "name_path": "data.user_name", "phone_path": "data.MobileNo",
+    "role_path": "data.role", "active_path": "data.is_active_user", "active_value": "1",
+    "role_map": {"Super Admin": "owner"}}');
+INSERT INTO app.tenant_modules (tenant_id, module_key)
+  SELECT '<tenant id>', key FROM app.modules WHERE NOT is_core;
+```
+
 ## Database setup (once, as an admin role)
 
 ```bash
 createdb -U postgres whatsapp_escalation
 psql -U postgres -d whatsapp_escalation -v ON_ERROR_STOP=1 -f migrations/core/001_core_schema.up.sql
 psql -U postgres -d whatsapp_escalation -v ON_ERROR_STOP=1 -f migrations/core/002_worker_functions.up.sql
+psql -U postgres -d whatsapp_escalation -v ON_ERROR_STOP=1 -f migrations/core/003_erp_identity.up.sql
 psql -U postgres -d whatsapp_escalation -c "ALTER ROLE app_user LOGIN PASSWORD '<strong password>'"
 ```
 
@@ -48,10 +76,14 @@ Monthly (or on deploy): `SELECT app.ensure_message_partitions(now()::date, 3);` 
 ```bash
 pip install -e ".[dev]"   # or install the dependencies listed in pyproject.toml
 cp .env.example .env      # fill DATABASE_URL (app_user), JWT_SECRET, API_KEY_PEPPER, DATA_ENCRYPTION_KEY
-uvicorn app.main:create_app --factory --port 8000
+python -m app.serve 8000          # local, works on Windows; Docker uses the uvicorn CLI
 python -m workers.report_worker
 python -m workers.scheduler
 ```
+
+Windows note: psycopg's async driver needs the selector event loop. `app.serve`, the workers and
+the tests set it via `use_selector_loop_on_windows()`. Plain `uvicorn ...` in one process on
+Windows uses the Proactor loop and fails to connect; Linux containers are unaffected.
 
 ## Tests
 

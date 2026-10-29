@@ -1,21 +1,27 @@
 """Platform auth endpoints: login, refresh, current user, API key management."""
 from __future__ import annotations
 
+import hashlib
+import hmac
+import ipaddress
 from datetime import datetime, timedelta, timezone
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, Request
+from psycopg import errors as psycopg_errors
 from pydantic import BaseModel, Field
 
 from ..db import system_transaction, tenant_transaction
 from ..errors import NotFound, Unauthorized
+from ..security import rate_limit
 from ..tenancy import Principal
-from . import api_keys
+from . import api_keys, erp
 from .dependencies import current_principal, require_scope, tenant_conn
 from .passwords import verify_password
 from .tokens import hash_refresh_token, issue_access_token, new_refresh_token
 
 router = APIRouter(prefix="/v1", tags=["auth"])
+EXCHANGE_LIMIT_PER_MINUTE = 30
 
 
 class LoginIn(BaseModel):
@@ -36,10 +42,23 @@ class TokenOut(BaseModel):
     tenant_id: UUID
 
 
+class ExchangeIn(BaseModel):
+    erp_token: str = Field(min_length=10, max_length=2000)
+
+
 class ApiKeyIn(BaseModel):
     name: str = Field(min_length=1, max_length=100)
     scopes: list[str] = Field(min_length=1, max_length=20)
     expires_in_days: int | None = Field(default=None, ge=1, le=730)
+
+
+def _client_ip(request: Request) -> str | None:
+    """Only a real IP address; proxies and test clients can report other strings."""
+    host = request.client.host if request.client else None
+    try:
+        return str(ipaddress.ip_address(host)) if host else None
+    except ValueError:
+        return None
 
 
 async def _issue(request: Request, *, user_id: UUID, tenant_id: UUID, revoke_session: UUID | None = None) -> TokenOut:
@@ -56,8 +75,7 @@ async def _issue(request: Request, *, user_id: UUID, tenant_id: UUID, revoke_ses
         await conn.execute(
             """INSERT INTO app.auth_sessions (tenant_id, user_id, token_hash, user_agent, ip, expires_at)
                VALUES (%s, %s, %s, %s, %s, %s)""",
-            (tenant_id, user_id, refresh_hash, request.headers.get("user-agent", "")[:300],
-             request.client.host if request.client else None, expires),
+            (tenant_id, user_id, refresh_hash, request.headers.get("user-agent", "")[:300], _client_ip(request), expires),
         )
     access = issue_access_token(settings.jwt_secret, settings.access_token_minutes,
                                 user_id=user_id, tenant_id=tenant_id, role=member["role"])
@@ -97,6 +115,50 @@ async def refresh(body: RefreshIn, request: Request):
         raise Unauthorized("Session expired; sign in again")
     return await _issue(request, user_id=session["user_id"], tenant_id=session["tenant_id"],
                         revoke_session=session["session_id"])
+
+
+@router.post("/auth/exchange/{provider_slug}", response_model=TokenOut)
+async def exchange(provider_slug: str, body: ExchangeIn, request: Request):
+    """Called by the frontend when the user opens the module: ERP token in, module token out."""
+    state = request.app.state
+    await rate_limit.check_key(state.redis, f"exchange:{_client_ip(request) or 'unknown'}", EXCHANGE_LIMIT_PER_MINUTE)
+    async with system_transaction(state.db) as conn:
+        cur = await conn.execute("SELECT * FROM app.resolve_identity_provider(%s)", (provider_slug,))
+        provider = await cur.fetchone()
+    if provider is None:
+        raise NotFound("Unknown sign-in provider")
+
+    identity = await erp.verify_erp_token(state.http, state.redis, provider, body.erp_token)
+
+    cipher = state.services["cipher"]
+    phone_hash = phone_enc = None
+    if identity.phone:
+        digits = "".join(ch for ch in identity.phone if ch.isdigit())[-10:]
+        phone_hash = hmac.new(state.settings.api_key_pepper.encode(), f"phone:{digits}".encode(),
+                              hashlib.sha256).hexdigest()
+        phone_enc = cipher.encrypt(digits, provider["tenant_id"]) if cipher else None
+    async with system_transaction(state.db) as conn:
+        try:
+            cur = await conn.execute(
+                "SELECT * FROM app.upsert_external_user(%s, %s, %s, %s, %s, %s)",
+                (provider["provider_id"], identity.external_id, identity.name, phone_hash, phone_enc, identity.role),
+            )
+        except psycopg_errors.InsufficientPrivilege:
+            raise Unauthorized("This user is disabled in WhatsApp Escalation") from None
+        user = await cur.fetchone()
+    return await _issue(request, user_id=user["out_user_id"], tenant_id=user["out_tenant_id"])
+
+
+@router.post("/auth/logout", status_code=204)
+async def logout(body: RefreshIn, request: Request):
+    async with system_transaction(request.app.state.db) as conn:
+        cur = await conn.execute("SELECT session_id, tenant_id FROM app.resolve_auth_session(%s)",
+                                 (hash_refresh_token(body.refresh_token),))
+        session = await cur.fetchone()
+    if session is None:
+        return
+    async with tenant_transaction(request.app.state.db, session["tenant_id"]) as conn:
+        await conn.execute("UPDATE app.auth_sessions SET revoked_at = now() WHERE id = %s", (session["session_id"],))
 
 
 @router.get("/me")

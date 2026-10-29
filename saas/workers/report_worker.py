@@ -9,6 +9,7 @@ import logging
 import os
 import socket
 
+from app.core.db import use_selector_loop_on_windows
 from app.core.modules import discover, job_handlers
 from app.core.queue import Worker
 
@@ -27,4 +28,5 @@ async def main() -> None:
 
 
 if __name__ == "__main__":
+    use_selector_loop_on_windows()
     asyncio.run(main())
