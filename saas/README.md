@@ -142,8 +142,27 @@ SAAS_TEST_OWNER_URL=postgresql://postgres:...@127.0.0.1/whatsapp_escalation_test
 SAAS_TEST_APP_URL=postgresql://app_user:...@127.0.0.1/whatsapp_escalation_test python -m pytest -q tests/isolation
 ```
 
+## WhatsApp ingest
+
+`workers/ingest_worker.py` keeps each tenant's WhatsApp number connected (one `SessionRunner` per
+session, `app/modules/groups/whatsapp/`) and stores group messages. One owner per session is
+guaranteed by a PostgreSQL advisory lock. WhatsApp login keys live in neonize's own store:
+
+```text
+WA_STORE_DATABASE=postgres://wa_store_user:...@127.0.0.1:5433/whatsapp_sessions   # production
+WA_STORE_DATABASE=data/wa-store.sqlite3                                           # local default
+```
+
+Keep that store separate from `whatsapp_escalation` and restrict who can read it: it holds the
+keys of every connected number.
+
+API (scope `whatsapp:manage`, owners/admins): `POST /v1/groups/sessions` adds a number,
+`GET /v1/groups/sessions/{id}` shows status and the QR while pairing, `POST .../reconnect`
+restarts it. The worker notices changes within 5 seconds.
+
 ## Not ported yet
 
-- `workers/ingest_worker.run_session`: the neonize WhatsApp client (from `app/escalation_analyst/whatsapp/`).
+- WhatsApp: sending reports to WhatsApp, the `!analyse` group command, renaming senders saved
+  before their contact was known (`rename_authors`), logging a number out from the module.
 - `performance` and `logistics` engines: their jobs fail with a clear "not ported" message.
 - Exports (`app/shared/exports`) and a storage adapter for media files.

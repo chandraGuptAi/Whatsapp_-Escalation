@@ -6,10 +6,21 @@ from uuid import UUID
 from pydantic import BaseModel, Field
 
 
+class SessionIn(BaseModel):
+    label: str = Field(default="", max_length=100)
+
+
 class SessionOut(BaseModel):
     id: UUID
+    label: str
     status: str
+    status_message: str | None
     last_seen_at: datetime | None
+
+
+class SessionDetail(SessionOut):
+    qr_image: str | None          # data:image/svg+xml;base64,... while pairing and not expired
+    qr_expires_at: datetime | None
 
 
 class GroupOut(BaseModel):

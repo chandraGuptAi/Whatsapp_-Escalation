@@ -2,9 +2,7 @@
 messages must exist, and any AWB number it mentions must appear in those messages."""
 from __future__ import annotations
 
-import re
-
-AWB = re.compile(r"(?<!\d)\d{10,14}(?!\d)")
+from app.shared.awb import find_awbs
 
 
 def validate_findings(result: dict, source: dict[str, str]) -> list[dict]:
@@ -23,7 +21,7 @@ def validate_findings(result: dict, source: dict[str, str]) -> list[dict]:
         if unknown:
             issues.append({"finding": index, "issue": "cites unknown messages", "ids": unknown[:5]})
         cited = " ".join(source.get(i, "") for i in ids)
-        for awb in AWB.findall(str(finding.get("text", ""))):
+        for awb in find_awbs(str(finding.get("text", ""))):
             if awb not in cited:
                 issues.append({"finding": index, "issue": "AWB not in cited messages", "awb": awb})
     return issues

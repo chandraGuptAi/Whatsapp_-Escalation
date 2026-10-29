@@ -2,11 +2,11 @@
 counts. These numbers go into the report as-is, so they are exact by construction."""
 from __future__ import annotations
 
-import re
 from collections import Counter
 from dataclasses import dataclass, field
 
-AWB = re.compile(r"(?<!\d)\d{10,14}(?!\d)")
+from app.shared.awb import find_awbs
+
 STATUS_WORDS = {
     "delivered": ("delivered", "pod received"),
     "rto": ("rto", "return to origin"),
@@ -34,7 +34,7 @@ def extract_facts(rows: list[dict]) -> Facts:
     statuses: Counter[str] = Counter()
     for row in rows:
         text = f"{row.get('body') or ''} {row.get('media_text') or ''}"
-        mentions.update(AWB.findall(text))
+        mentions.update(find_awbs(text))
         lowered = text.lower()
         for status, words in STATUS_WORDS.items():
             if any(word in lowered for word in words):

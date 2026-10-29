@@ -80,7 +80,7 @@ async def generate_group_report(ctx: JobContext, *, purpose: str, prompt_version
              ctx.job_id),
         )
         report_id = (await cur.fetchone())["id"]
-        await conn.executemany(
+        await cur.executemany(
             "INSERT INTO app.report_groups (tenant_id, report_id, group_id) VALUES (%s, %s, %s)",
             [(ctx.tenant_id, report_id, g) for g in group_ids],
         )

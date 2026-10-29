@@ -9,9 +9,43 @@ _GROUP = """SELECT id, session_id, cluster_id, jid, coalesce(name_override, name
                    is_active, last_message_at FROM app.wa_groups"""
 
 
+_SESSION = "SELECT id, label, status, status_message, last_seen_at FROM app.wa_sessions"
+
+
 async def list_sessions(conn) -> list[dict]:
-    cur = await conn.execute("SELECT id, status, last_seen_at FROM app.wa_sessions ORDER BY created_at")
+    cur = await conn.execute(f"{_SESSION} ORDER BY created_at")
     return await cur.fetchall()
+
+
+async def get_session(conn, session_id: UUID) -> dict | None:
+    cur = await conn.execute(
+        """SELECT id, label, status, status_message, last_seen_at,
+                  CASE WHEN qr_expires_at > now() THEN qr_image END AS qr_image,
+                  CASE WHEN qr_expires_at > now() THEN qr_expires_at END AS qr_expires_at
+             FROM app.wa_sessions WHERE id = %s""",
+        (session_id,),
+    )
+    return await cur.fetchone()
+
+
+async def create_session(conn, tenant_id: UUID, label: str) -> dict:
+    cur = await conn.execute(
+        """INSERT INTO app.wa_sessions (tenant_id, label, status, status_message)
+           VALUES (%s, %s, 'pending', 'Waiting for the WhatsApp worker to start...') RETURNING id""",
+        (tenant_id, label),
+    )
+    return await cur.fetchone()
+
+
+async def request_reconnect(conn, session_id: UUID) -> bool:
+    cur = await conn.execute(
+        """UPDATE app.wa_sessions
+              SET status = 'pending', status_message = 'Reconnecting...', restart_requested_at = now(),
+                  qr_image = NULL, qr_expires_at = NULL
+            WHERE id = %s RETURNING id""",
+        (session_id,),
+    )
+    return await cur.fetchone() is not None
 
 
 async def list_groups(conn, *, active: bool | None) -> list[dict]:
@@ -70,23 +104,25 @@ async def create_cluster(conn, tenant_id: UUID, name: str) -> dict | None:
     return await cur.fetchone()
 
 
-async def insert_message(conn, tenant_id: UUID, group_id: UUID, message: dict) -> bool:
-    """Idempotent: the same WhatsApp message delivered twice is stored once. Returns True if new."""
+async def insert_message(conn, tenant_id: UUID, group_id: UUID, message: dict) -> dict | None:
+    """Idempotent: the same WhatsApp message delivered twice is stored once.
+    Returns {"id", "sent_at"} when new, None when it was already stored."""
     cur = await conn.execute(
         """INSERT INTO app.messages (tenant_id, group_id, wa_msg_id, sender_hash, sender_name, kind, body,
                                      reply_to, sent_at)
            VALUES (%(tenant)s, %(group)s, %(wa_msg_id)s, %(sender_hash)s, %(sender_name)s, %(kind)s, %(body)s,
                    %(reply_to)s, %(sent_at)s)
-           ON CONFLICT DO NOTHING RETURNING id""",
+           ON CONFLICT DO NOTHING RETURNING id, sent_at""",
         {"tenant": tenant_id, "group": group_id, **message},
     )
-    if await cur.fetchone() is None:
-        return False
+    row = await cur.fetchone()
+    if row is None:
+        return None
     await conn.execute(
         "UPDATE app.wa_groups SET last_message_at = greatest(coalesce(last_message_at, %s), %s) WHERE id = %s",
         (message["sent_at"], message["sent_at"], group_id),
     )
-    return True
+    return row
 
 
 async def pending_media(conn, limit: int) -> list[dict]:

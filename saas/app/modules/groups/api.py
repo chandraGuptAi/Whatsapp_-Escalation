@@ -10,15 +10,41 @@ from app.core.errors import NotFound
 from app.core.tenancy import Principal
 
 from . import repository, service
-from .schemas import ClusterIn, ClusterOut, GroupOut, GroupUpdate, MessagePage, SessionOut
+from .schemas import (ClusterIn, ClusterOut, GroupOut, GroupUpdate, MessagePage, SessionDetail, SessionIn,
+                      SessionOut)
 
 router = APIRouter(tags=["groups"])
 read, write = require_scope("groups:read"), require_scope("groups:write")
 
 
+manage = require_scope("whatsapp:manage")
+
+
 @router.get("/sessions", response_model=list[SessionOut])
 async def list_sessions(_=Depends(read), conn=Depends(tenant_conn)):
     return await repository.list_sessions(conn)
+
+
+@router.post("/sessions", response_model=SessionDetail, status_code=201)
+async def create_session(body: SessionIn, principal: Principal = Depends(manage), conn=Depends(tenant_conn)):
+    """Adds a WhatsApp number. The ingest worker starts it within seconds; poll GET for the QR."""
+    row = await repository.create_session(conn, principal.tenant_id, body.label.strip())
+    return await repository.get_session(conn, row["id"])
+
+
+@router.get("/sessions/{session_id}", response_model=SessionDetail)
+async def get_session(session_id: UUID, _=Depends(manage), conn=Depends(tenant_conn)):
+    session = await repository.get_session(conn, session_id)
+    if session is None:
+        raise NotFound("WhatsApp session not found")
+    return session
+
+
+@router.post("/sessions/{session_id}/reconnect", response_model=SessionDetail)
+async def reconnect_session(session_id: UUID, _=Depends(manage), conn=Depends(tenant_conn)):
+    if not await repository.request_reconnect(conn, session_id):
+        raise NotFound("WhatsApp session not found")
+    return await repository.get_session(conn, session_id)
 
 
 @router.get("", response_model=list[GroupOut])

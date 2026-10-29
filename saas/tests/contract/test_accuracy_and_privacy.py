@@ -20,7 +20,7 @@ def test_validator_accepts_cited_awb():
 def test_validator_rejects_invented_awb_unknown_id_and_missing_citation():
     source = {"m1": "AWB 1234567890 delayed"}
     result = {"findings": [
-        {"text": "9999999999 is lost", "message_ids": ["m1"]},
+        {"text": "5999999999 is lost", "message_ids": ["m1"]},
         {"text": "something", "message_ids": ["nope"]},
         {"text": "no citation"},
     ]}
@@ -96,3 +96,14 @@ def test_scheduled_run_gets_concrete_window():
     assert options["window_end"] == due.isoformat()
     assert options["window_start"] == "2026-10-28T21:00:00+00:00"
     assert "window_hours" not in options
+
+
+def test_awb_finder_tells_awbs_from_mobile_numbers():
+    from app.shared.awb import find_awbs
+
+    assert find_awbs("AWB 9123456789 delayed, call 9876543210") == ["9123456789"]
+    assert find_awbs("tracking no: 8123456789") == ["8123456789"]
+    assert find_awbs("contact +91 98765 43210 or 919876543210") == []
+    assert find_awbs("1234567890 and 5555555555 stuck") == ["1234567890", "5555555555"]
+    assert find_awbs("13-digit 1234567890123 delivered") == ["1234567890123"]
+    assert find_awbs("12345678 / BGSC0078363792") == ["BGSC0078363792"]

@@ -42,6 +42,9 @@ class Settings:
     ai_max_input_tokens: int
     worker_concurrency: int
     job_lease_seconds: int
+    wa_store_database: str = "data/wa-store.sqlite3"
+    whatsapp_history_limit: int = 50
+    media_max_bytes: int = 6 * 1024 * 1024
 
     @classmethod
     def from_env(cls) -> "Settings":
@@ -69,6 +72,9 @@ class Settings:
             ai_max_input_tokens=_int("AI_MAX_INPUT_TOKENS", 60000),
             worker_concurrency=_int("WORKER_CONCURRENCY", 4),
             job_lease_seconds=_int("JOB_LEASE_SECONDS", 900),
+            wa_store_database=os.getenv("WA_STORE_DATABASE", "data/wa-store.sqlite3"),
+            whatsapp_history_limit=_int("WHATSAPP_HISTORY_LIMIT", 50),
+            media_max_bytes=_int("MEDIA_MAX_BYTES", 6 * 1024 * 1024),
         )
 
 
