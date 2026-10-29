@@ -59,7 +59,26 @@ INSERT INTO app.tenant_modules (tenant_id, module_key)
   SELECT '<tenant id>', key FROM app.modules WHERE NOT is_core;
 ```
 
-### Simple mode (ERP without a current-user API) — used for Bigship for now
+### ERP-signed tokens (ERP in front of the module) — the target setup for Bigship
+
+The ERP checks its own login, then calls this service on the user's behalf with
+`Authorization: Bearer <JWT signed by the ERP>` on every request. The service verifies it locally
+with the ERP's public key (RS256): issuer, `aud = whatsapp-escalation`, expiry, lifetime <= 300 s.
+
+Claims: `iss`, `aud`, `sub` (login_user_id), `name`, `mobile`, `role` (optional), `iat`, `exp`.
+
+Until the ERP delivers its key, a static stand-in signs test tokens (development only):
+
+```bash
+python -m scripts.dev_erp keys        # .dev-erp/ key pair (git-ignored) + setup SQL to run once
+python -m scripts.dev_erp token --sub 1 --name "ANKIT JAIN" --mobile 8800674795 --role "Super Admin"
+curl -H "Authorization: Bearer <token>" http://127.0.0.1:8000/v1/me
+```
+
+When the ERP delivers: replace `config.public_key` (and `config.issuer` if different) on the
+`bigship-erp-jwt` provider row. No code change.
+
+### Simple mode (ERP without a current-user API) — fallback
 
 The ERP call only proves the token belongs to a signed-in ERP user; the user details come from the
 ERP's stored login data. Roles are never taken from that data. Known gap: a signed-in ERP user can

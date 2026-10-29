@@ -1,14 +1,11 @@
 """Platform auth endpoints: login, refresh, current user, API key management."""
 from __future__ import annotations
 
-import hashlib
-import hmac
 import ipaddress
 from datetime import datetime, timedelta, timezone
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, Request
-from psycopg import errors as psycopg_errors
 from pydantic import BaseModel, Field
 
 from ..db import system_transaction, tenant_transaction
@@ -132,22 +129,9 @@ async def exchange(provider_slug: str, body: ExchangeIn, request: Request):
 
     identity = await erp.verify_erp_token(state.http, state.redis, provider, body.erp_token, body.user)
 
-    cipher = state.services["cipher"]
-    phone_hash = phone_enc = None
-    if identity.phone:
-        digits = "".join(ch for ch in identity.phone if ch.isdigit())[-10:]
-        phone_hash = hmac.new(state.settings.api_key_pepper.encode(), f"phone:{digits}".encode(),
-                              hashlib.sha256).hexdigest()
-        phone_enc = cipher.encrypt(digits, provider["tenant_id"]) if cipher else None
-    async with system_transaction(state.db) as conn:
-        try:
-            cur = await conn.execute(
-                "SELECT * FROM app.upsert_external_user(%s, %s, %s, %s, %s, %s)",
-                (provider["provider_id"], identity.external_id, identity.name, phone_hash, phone_enc, identity.role),
-            )
-        except psycopg_errors.InsufficientPrivilege:
-            raise Unauthorized("This user is disabled in WhatsApp Escalation") from None
-        user = await cur.fetchone()
+    phone_hash, phone_enc = erp.phone_fields(state.settings.api_key_pepper, state.services["cipher"],
+                                             provider["tenant_id"], identity.phone)
+    user = await erp.upsert_user(state.db, provider["provider_id"], identity, phone_hash, phone_enc)
     return await _issue(request, user_id=user["out_user_id"], tenant_id=user["out_tenant_id"])
 
 

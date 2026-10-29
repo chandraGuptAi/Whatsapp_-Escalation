@@ -10,8 +10,8 @@ from ..db import tenant_transaction
 from ..errors import Forbidden, Unauthorized
 from ..security import rate_limit
 from ..tenancy import Principal, current_principal_var
-from . import api_keys
-from .tokens import decode_access_token
+from . import api_keys, erp_jwt
+from .tokens import ISSUER, decode_access_token
 
 
 async def current_principal(request: Request) -> Principal:
@@ -21,6 +21,8 @@ async def current_principal(request: Request) -> Principal:
     state = request.app.state
     if token.startswith(api_keys.PREFIX):
         principal = await api_keys.authenticate(state.db, state.settings.api_key_pepper, token)
+    elif (issuer := erp_jwt.unverified_issuer(token)) not in (None, ISSUER):
+        principal = await erp_jwt.authenticate(state, token, issuer)
     else:
         principal = decode_access_token(state.settings.jwt_secret, token)
     await rate_limit.check(state.redis, principal.tenant_id, state.settings.rate_limit_per_minute)

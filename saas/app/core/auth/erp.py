@@ -9,6 +9,7 @@ The ERP token is never stored or logged.
 from __future__ import annotations
 
 import hashlib
+import hmac
 import json
 from dataclasses import dataclass
 
@@ -26,6 +27,32 @@ class ErpIdentity:
     name: str
     phone: str | None
     role: str | None        # module role from the provider's role_map, None = keep current
+
+
+def phone_fields(pepper: str, cipher, tenant_id, phone: str | None) -> tuple[str | None, bytes | None]:
+    """(hash for lookups, encrypted value) of the last 10 digits; the plain number is never stored."""
+    if not phone:
+        return None, None
+    digits = "".join(ch for ch in phone if ch.isdigit())[-10:]
+    phone_hash = hmac.new(pepper.encode(), f"phone:{digits}".encode(), hashlib.sha256).hexdigest()
+    return phone_hash, cipher.encrypt(digits, tenant_id) if cipher else None
+
+
+async def upsert_user(db, provider_id, identity: ErpIdentity, phone_hash, phone_enc) -> dict:
+    """Creates/updates the ERP user and membership. Returns out_user_id, out_tenant_id, out_role."""
+    from psycopg import errors as psycopg_errors
+
+    from ..db import system_transaction
+
+    async with system_transaction(db) as conn:
+        try:
+            cur = await conn.execute(
+                "SELECT * FROM app.upsert_external_user(%s, %s, %s, %s, %s, %s)",
+                (provider_id, identity.external_id, identity.name, phone_hash, phone_enc, identity.role),
+            )
+        except psycopg_errors.InsufficientPrivilege:
+            raise Unauthorized("This user is disabled in WhatsApp Escalation") from None
+        return await cur.fetchone()
 
 
 def pick(data, path: str | None):
