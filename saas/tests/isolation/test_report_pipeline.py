@@ -103,3 +103,40 @@ def test_report_is_masked_validated_saved_and_cached(seeded):
     assert content["facts"]["status_counts"] == {"delay": 1}
     assert groups == [group]
     assert calls == [("ok", False, True)]
+
+
+def test_text_answers_are_masked_on_the_way_out_and_restored_on_the_way_back(seeded):
+    from app.core.ai import AIGateway, AIRequest
+    from app.core.db import Database, use_selector_loop_on_windows
+    from app.core.security import Cipher
+
+    tenant, *_ = seeded
+    seen = []
+
+    class EchoProvider:
+        name, model = "deepseek", "fake-model"
+
+        async def complete_text(self, system_prompt, user_content):
+            seen.append(user_content)
+            return f"| Seller | Note |\n|---|---|\n{user_content}", {"tokens_in": 5, "tokens_out": 5}
+
+    gateway = AIGateway(EchoProvider(), Cipher(base64.b64encode(os.urandom(32)).decode()), "pepper", 60000)
+    use_selector_loop_on_windows()
+
+    async def scenario():
+        db = Database(APP_URL, min_size=1, max_size=2)
+        await db.open()
+        try:
+            request = AIRequest(purpose="master_report", prompt_version="t-v1", system_prompt="Report.",
+                                text="Ramesh FE: AWB 9123456789 stuck, call 9876543210",
+                                personal_values={"Ramesh FE": "name"}, keep_values=frozenset({"9123456789"}))
+            first = await gateway.complete_text(db, tenant, request)
+            second = await gateway.complete_text(db, tenant, request)  # served from cache
+            return first, second
+        finally:
+            await db.close()
+
+    first, second = asyncio.run(scenario())
+    assert len(seen) == 1
+    assert "Ramesh FE" not in seen[0] and "9876543210" not in seen[0] and "9123456789" in seen[0]
+    assert "Ramesh FE" in first and "9876543210" in first and first == second

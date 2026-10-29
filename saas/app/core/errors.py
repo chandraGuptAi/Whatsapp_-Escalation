@@ -42,6 +42,15 @@ class RateLimited(AppError):
     status, code = 429, "rate_limited"
 
 
+class EscalationError(AppError):
+    """Signature of the old service's error, kept so ported engines raise unchanged:
+    EscalationError(400, "message")."""
+
+    def __init__(self, status: int, message: str):
+        super().__init__(message, status=status, code={400: "bad_request", 404: "not_found", 409: "conflict",
+                                                         422: "invalid_request", 503: "unavailable"}.get(status, "error"))
+
+
 def _body(code: str, message: str, **extra) -> dict:
     return {"error": {"code": code, "message": message, **extra}}
 

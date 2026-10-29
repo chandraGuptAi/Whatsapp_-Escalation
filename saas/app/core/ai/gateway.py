@@ -3,6 +3,11 @@
 Order for every request: keep allowed fields -> mask personal data -> size budget ->
 cache lookup -> provider call -> audit row -> cache store. A rerun over unchanged data
 is answered from app.analysis_cache without calling the provider at all.
+
+Two answer shapes share that path:
+  complete_json(): structured records in, JSON out (caller restores masked values if needed).
+  complete_text(): a prepared text (e.g. a chat transcript) in, Markdown/text out, with masked
+                   values put back before it is returned.
 """
 from __future__ import annotations
 
@@ -15,7 +20,7 @@ from uuid import UUID
 from ..db import Database, tenant_transaction
 from ..errors import AppError
 from ..security import Cipher
-from .redact import Redactor
+from .redact import Redactor, restore
 
 CACHE_TTL_SECONDS = 7 * 24 * 3600
 
@@ -25,10 +30,15 @@ class AIRequest:
     purpose: str
     prompt_version: str
     system_prompt: str
-    records: list[dict]
-    allowed_fields: tuple[str, ...]
+    # Structured input (complete_json): only allowed_fields of each record are sent.
+    records: list[dict] = field(default_factory=list)
+    allowed_fields: tuple[str, ...] = ()
     # field -> pii kind, for fields that are personal as a whole (e.g. sender_name -> "name")
     personal_fields: dict[str, str] = field(default_factory=dict)
+    # Prepared text input (complete_text), e.g. a transcript built from messages.
+    text: str | None = None
+    # exact strings inside `text` to mask, value -> pii kind (e.g. {"Ramesh FE": "name"})
+    personal_values: dict[str, str] = field(default_factory=dict)
     keep_values: frozenset[str] = frozenset()
     job_id: UUID | None = None
 
@@ -40,16 +50,25 @@ class AIGateway:
     async def complete_json(self, db: Database, tenant_id: UUID, request: AIRequest) -> dict:
         """Uses its own short transactions: no connection is held while the provider runs,
         and audit rows are committed even when the call fails."""
+        return await self._complete(db, tenant_id, request, "json")
+
+    async def complete_text(self, db: Database, tenant_id: UUID, request: AIRequest) -> str:
+        """Text/Markdown answer with masked values restored for the tenant's own report."""
+        result = await self._complete(db, tenant_id, request, "text")
+        async with tenant_transaction(db, tenant_id) as conn:
+            return await restore(conn, self.cipher, tenant_id, result["text"])
+
+    async def _complete(self, db: Database, tenant_id: UUID, request: AIRequest, shape: str) -> dict:
         if self.cipher is None:
             raise RuntimeError("DATA_ENCRYPTION_KEY must be configured before AI calls")
         async with tenant_transaction(db, tenant_id) as conn:
             redactor = Redactor(conn, self.cipher, tenant_id, self.pepper)
-            payload = [await self._prepare(redactor, record, request) for record in request.records]
-            body = json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
-            digest = hashlib.sha256(f"{request.prompt_version}\n{request.system_prompt}\n{body}".encode()).hexdigest()
+            body = await self._body(redactor, request, shape)
+            digest = hashlib.sha256(f"{shape}\n{request.prompt_version}\n{request.system_prompt}\n{body}"
+                                    .encode()).hexdigest()
             audit = {"tenant_id": tenant_id, "job_id": request.job_id, "purpose": request.purpose,
                      "prompt_version": request.prompt_version, "payload_hash": digest,
-                     "fields_sent": list(request.allowed_fields), "redaction_count": redactor.count}
+                     "fields_sent": list(request.allowed_fields) or ["text"], "redaction_count": redactor.count}
             if len(body) // 3 > self.max_input_tokens:
                 await self._audit(conn, audit, status="rejected", error="input over token budget")
                 hit, rejected = None, True
@@ -69,7 +88,11 @@ class AIGateway:
 
         started = time.monotonic()
         try:
-            result, usage = await self.provider.complete_json(request.system_prompt, body)
+            if shape == "json":
+                result, usage = await self.provider.complete_json(request.system_prompt, body)
+            else:
+                text, usage = await self.provider.complete_text(request.system_prompt, body)
+                result = {"text": text}
         except Exception as exc:
             async with tenant_transaction(db, tenant_id) as conn:
                 await self._audit(conn, audit, status="error", error=f"{type(exc).__name__}: {exc}"[:500],
@@ -89,6 +112,18 @@ class AIGateway:
                 (tenant_id, digest, request.prompt_version, Jsonb(result), CACHE_TTL_SECONDS),
             )
         return result
+
+    async def _body(self, redactor: Redactor, request: AIRequest, shape: str) -> str:
+        if shape == "text":
+            if request.text is None:
+                raise ValueError("complete_text needs AIRequest.text")
+            text = request.text
+            for value in sorted(request.personal_values, key=len, reverse=True):  # longest first
+                if value and value in text:
+                    text = text.replace(value, await redactor.token_for(request.personal_values[value], value))
+            return await redactor.redact_text(text, request.keep_values)
+        payload = [await self._prepare(redactor, record, request) for record in request.records]
+        return json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
 
     async def _prepare(self, redactor: Redactor, record: dict, request: AIRequest) -> dict:
         row = {}

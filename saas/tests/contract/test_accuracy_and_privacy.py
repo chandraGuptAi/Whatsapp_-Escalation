@@ -106,4 +106,5 @@ def test_awb_finder_tells_awbs_from_mobile_numbers():
     assert find_awbs("contact +91 98765 43210 or 919876543210") == []
     assert find_awbs("1234567890 and 5555555555 stuck") == ["1234567890", "5555555555"]
     assert find_awbs("13-digit 1234567890123 delivered") == ["1234567890123"]
-    assert find_awbs("12345678 / BGSC0078363792") == ["BGSC0078363792"]
+    # 8-16 digit numbers are candidates, as in the old service's reports
+    assert find_awbs("12345678 / BGSC0078363792") == ["12345678", "BGSC0078363792"]

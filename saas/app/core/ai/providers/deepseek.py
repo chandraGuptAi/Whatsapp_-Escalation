@@ -22,14 +22,22 @@ class DeepSeekProvider:
         return self._client
 
     async def complete_json(self, system_prompt: str, user_content: str) -> tuple[dict, dict]:
+        text, usage = await self._complete(system_prompt, user_content, {"type": "json_object"})
+        return json.loads(text or "{}"), usage
+
+    async def complete_text(self, system_prompt: str, user_content: str) -> tuple[str, dict]:
+        return await self._complete(system_prompt, user_content, None)
+
+    async def _complete(self, system_prompt: str, user_content: str, response_format: dict | None):
+        extra = {"response_format": response_format} if response_format else {}
         response = await self._get_client().chat.completions.create(
             model=self.model,
             temperature=0,
-            response_format={"type": "json_object"},
             messages=[{"role": "system", "content": system_prompt}, {"role": "user", "content": user_content}],
+            **extra,
         )
         usage = response.usage
-        return json.loads(response.choices[0].message.content or "{}"), {
+        return response.choices[0].message.content or "", {
             "tokens_in": getattr(usage, "prompt_tokens", 0) or 0,
             "tokens_out": getattr(usage, "completion_tokens", 0) or 0,
         }
