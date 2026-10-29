@@ -1,0 +1,56 @@
+# Local/single-server stack. Each process scales on its own:
+#   docker compose -f deploy/compose.yaml up -d --scale report-worker=4
+# Apply migrations once as the owner role before first start (see README).
+x-app: &app
+  build:
+    context: ..
+    dockerfile: deploy/Dockerfile
+  env_file: ../.env
+  restart: unless-stopped
+  depends_on: [postgres, redis]
+
+services:
+  api:
+    <<: *app
+    ports:
+      - "127.0.0.1:8000:8000"
+
+  report-worker:
+    <<: *app
+    command: ["python", "-m", "workers.report_worker"]
+    stop_grace_period: 120s
+
+  scheduler:
+    <<: *app
+    command: ["python", "-m", "workers.scheduler"]
+
+  ingest-worker:
+    <<: *app
+    command: ["python", "-m", "workers.ingest_worker"]
+    environment:
+      INGEST_SHARD: "0"
+      INGEST_SHARDS: "1"
+
+  postgres:
+    image: postgres:18-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: whatsapp_escalation
+      POSTGRES_PASSWORD_FILE: /run/secrets/pg_password
+    secrets: [pg_password]
+    volumes:
+      - pgdata:/var/lib/postgresql
+    ports:
+      - "127.0.0.1:5432:5432"
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    command: ["redis-server", "--save", "", "--appendonly", "no"]
+
+secrets:
+  pg_password:
+    file: ./secrets/pg_password.txt
+
+volumes:
+  pgdata:
