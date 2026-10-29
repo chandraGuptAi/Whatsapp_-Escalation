@@ -44,6 +44,8 @@ class TokenOut(BaseModel):
 
 class ExchangeIn(BaseModel):
     erp_token: str = Field(min_length=10, max_length=2000)
+    # Only used by providers in simple mode (ERP has no current-user API): the ERP's stored user details.
+    user: dict | None = None
 
 
 class ApiKeyIn(BaseModel):
@@ -128,7 +130,7 @@ async def exchange(provider_slug: str, body: ExchangeIn, request: Request):
     if provider is None:
         raise NotFound("Unknown sign-in provider")
 
-    identity = await erp.verify_erp_token(state.http, state.redis, provider, body.erp_token)
+    identity = await erp.verify_erp_token(state.http, state.redis, provider, body.erp_token, body.user)
 
     cipher = state.services["cipher"]
     phone_hash = phone_enc = None

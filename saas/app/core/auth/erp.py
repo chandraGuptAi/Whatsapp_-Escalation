@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import hashlib
 import json
-from dataclasses import asdict, dataclass
+from dataclasses import dataclass
 
 import httpx
 
@@ -56,10 +56,31 @@ def identity_from_reply(reply: dict, config: dict) -> ErpIdentity:
                        phone=str(phone) if phone else None, role=role)
 
 
-async def verify_erp_token(client: httpx.AsyncClient, redis, provider: dict, erp_token: str) -> ErpIdentity:
+async def verify_erp_token(client: httpx.AsyncClient, redis, provider: dict, erp_token: str,
+                           claimed_user: dict | None = None) -> ErpIdentity:
+    """Normal mode: identity comes from the ERP's reply (needs a "current user" API).
+
+    Simple mode (config "trust_request_identity": true), for ERPs without such an API: the ERP
+    call only proves the token belongs to a signed-in ERP user; the user details come from the
+    request. The role is never taken from the request: it is managed inside the module.
+    Known gap: a signed-in ERP user can claim another user's id. Switch to normal mode when the
+    ERP offers a current-user API (configuration change only)."""
+    config = provider["config"] or {}
+    simple_mode = bool(config.get("trust_request_identity"))
+    if simple_mode and not claimed_user:
+        raise AppError("User details are required", code="invalid_request", status=422)
+
+    reply = await _erp_reply(client, redis, provider, erp_token)
+    if not simple_mode:
+        return identity_from_reply(reply, config)
+    identity = identity_from_reply(claimed_user, config)
+    return ErpIdentity(external_id=identity.external_id, name=identity.name, phone=identity.phone, role=None)
+
+
+async def _erp_reply(client: httpx.AsyncClient, redis, provider: dict, erp_token: str) -> dict:
     token_key = "erp:" + hashlib.sha256(f"{provider['provider_id']}:{erp_token}".encode()).hexdigest()
     if redis is not None and (cached := await redis.get(token_key)):
-        return ErpIdentity(**json.loads(cached))
+        return json.loads(cached)
 
     config = provider["config"] or {}
     try:
@@ -78,7 +99,6 @@ async def verify_erp_token(client: httpx.AsyncClient, redis, provider: dict, erp
     except ValueError:
         raise AppError("The ERP returned an unexpected reply", code="erp_unavailable", status=502) from None
 
-    identity = identity_from_reply(reply, config)
     if redis is not None:
-        await redis.set(token_key, json.dumps(asdict(identity)), ex=VERIFIED_CACHE_SECONDS)
-    return identity
+        await redis.set(token_key, json.dumps(reply), ex=VERIFIED_CACHE_SECONDS)
+    return reply

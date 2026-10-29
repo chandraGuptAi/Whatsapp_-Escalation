@@ -47,6 +47,26 @@ def provider():
         conn.execute("DELETE FROM app.tenants WHERE id = %s", (tenant,))
 
 
+SIMPLE_CONFIG = {"trust_request_identity": True, "user_id_path": "login_user_id", "name_path": "user_name",
+                 "phone_path": "MobileNo", "active_path": "is_active_user", "active_value": "1"}
+CLAIMED = {"login_user_id": "77", "user_name": "TEST USER", "MobileNo": "9999999999", "role": "Super Admin",
+           "is_active_user": "1"}
+
+
+@pytest.fixture(scope="module")
+def simple_provider(provider):
+    import psycopg
+    from psycopg.types.json import Jsonb
+
+    _, tenant = provider
+    slug = f"erp-simple-{uuid.uuid4().hex[:6]}"
+    with psycopg.connect(OWNER_URL, autocommit=True) as conn:
+        conn.execute("""INSERT INTO app.identity_providers (tenant_id, slug, name, verify_url, config)
+                        VALUES (%s, %s, 'Simple ERP', 'https://erp.test/api/escalation-category/list', %s)""",
+                     (tenant, slug, Jsonb(SIMPLE_CONFIG)))
+    return slug
+
+
 @pytest.fixture(scope="module")
 def client(provider):
     from fastapi.testclient import TestClient
@@ -126,3 +146,19 @@ def test_refresh_rotates_and_logout_revokes(client, provider):
     assert client.post("/v1/auth/refresh", json={"refresh_token": first["refresh_token"]}).status_code == 401
     assert client.post("/v1/auth/logout", json={"refresh_token": second.json()["refresh_token"]}).status_code == 204
     assert client.post("/v1/auth/refresh", json={"refresh_token": second.json()["refresh_token"]}).status_code == 401
+
+
+def test_simple_mode_uses_request_data_but_never_its_role(client, simple_provider):
+    response = client.post(f"/v1/auth/exchange/{simple_provider}", json={"erp_token": GOOD, "user": CLAIMED})
+    assert response.status_code == 200, response.text
+    me = client.get("/v1/me", headers={"Authorization": f"Bearer {response.json()['access_token']}"}).json()
+    assert me["role"] == "viewer"  # "Super Admin" from localStorage is ignored
+
+
+def test_simple_mode_still_needs_a_valid_erp_token(client, simple_provider):
+    response = client.post(f"/v1/auth/exchange/{simple_provider}", json={"erp_token": "1656|forged", "user": CLAIMED})
+    assert response.status_code == 401
+
+
+def test_simple_mode_requires_user_data(client, simple_provider):
+    assert client.post(f"/v1/auth/exchange/{simple_provider}", json={"erp_token": GOOD}).status_code == 422

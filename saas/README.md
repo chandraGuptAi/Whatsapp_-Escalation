@@ -59,6 +59,35 @@ INSERT INTO app.tenant_modules (tenant_id, module_key)
   SELECT '<tenant id>', key FROM app.modules WHERE NOT is_core;
 ```
 
+### Simple mode (ERP without a current-user API) — used for Bigship for now
+
+The ERP call only proves the token belongs to a signed-in ERP user; the user details come from the
+ERP's stored login data. Roles are never taken from that data. Known gap: a signed-in ERP user can
+claim another user's id; remove `trust_request_identity` once the ERP offers a current-user API.
+
+```sql
+INSERT INTO app.identity_providers (tenant_id, slug, name, verify_url, config) VALUES (
+  '<tenant id>', 'bigship-erp', 'Bigship ERP', 'https://cmsbstapi.bigship.in/api/escalation-category/list',
+  '{"trust_request_identity": true, "user_id_path": "login_user_id", "name_path": "user_name",
+    "phone_path": "MobileNo", "active_path": "is_active_user", "active_value": "1"}');
+-- after the first sign-in, make the first owner (later done from the module's settings):
+UPDATE app.tenant_users SET role = 'owner'
+ WHERE user_id = (SELECT id FROM app.users WHERE external_id = '1');
+```
+
+Frontend, when the module opens:
+
+```js
+const res = await fetch("/v1/auth/exchange/bigship-erp", {
+  method: "POST", headers: { "Content-Type": "application/json" },
+  body: JSON.stringify({ erp_token: localStorage.getItem("token"),
+                         user: JSON.parse(localStorage.getItem("userId")) }),
+});
+const { access_token, refresh_token } = await res.json();
+// every module API:
+fetch("/v1/groups", { headers: { Authorization: `Bearer ${access_token}` } });
+```
+
 ## Database setup (once, as an admin role)
 
 ```bash
